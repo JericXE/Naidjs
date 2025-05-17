@@ -1,0 +1,213 @@
+-- Global config
+local hitboxValue = 1.0
+local libCheck = {}
+
+-- Offset checks
+local offsetChecks = {
+    [-352] = 1058642330,
+    [-396] = 1058642330,
+    [-416] = 1072064102,
+    [-508] = 1058642330
+}
+
+-- Function: Configure hitbox
+function configureHitbox()
+    local input = gg.prompt({"Set Hitbox Value [0;10])"}, {hitboxValue}, {"number"})
+    if input and tonumber(input[1]) and tonumber(input[1]) >= 0 and tonumber(input[1]) <= 10 then
+        hitboxValue = tonumber(input[1])
+        gg.toast("Hitbox value set to " .. hitboxValue)
+    else
+        gg.alert("Invalid input or canceled.")
+    end
+end
+
+-- Function: Find and patch 1.62s, store LibCheck address
+function patch162AndSaveLibCheck()
+
+    local target_value = 1.62
+    local new_value = 0.61
+    local offsets = {-52, -96, -116, -208}
+    local edits = {}
+
+    gg.clearResults()
+    gg.searchNumber(target_value, gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
+    local results = gg.getResults(1000)
+
+    for i, res in ipairs(results) do
+        local base_addr = res.address
+        for _, offset in ipairs(offsets) do
+            local addr = base_addr + offset
+            local old = gg.getValues({{address = addr, flags = gg.TYPE_FLOAT}})
+            if old and old[1] and type(old[1].value) == "number" then
+                table.insert(edits, {
+                    address = addr,
+                    flags = gg.TYPE_FLOAT,
+                    value = new_value
+                })
+            end
+        end
+    end
+
+    if #results > 0 then
+        libCheck["Check"] = results[1].address -- Save first result for Dword check
+    end
+
+    if #edits > 0 then
+        gg.setValues(edits)
+        gg.toast("Offsets patched!")
+    else
+        gg.toast("No valid offsets found.")
+    end
+
+    gg.alert("Done!")
+end
+
+-- Function: Hitbox finder + editor
+function findAndEditHitboxes()
+    gg.setRanges(gg.REGION_OTHER)
+    gg.clearResults()
+
+    local startTime = os.clock()
+    gg.searchNumber("1127481344", gg.TYPE_DWORD)
+    local allResults = gg.getResults(gg.getResultsCount())
+    local validEditTargets = {}
+
+    for _, result in ipairs(allResults) do
+        local checkList = {}
+        local passed = true
+
+        for offset, expected in pairs(offsetChecks) do
+            table.insert(checkList, {
+                address = result.address + offset,
+                flags = gg.TYPE_DWORD
+            })
+        end
+
+        local values = gg.getValues(checkList)
+        for i, val in ipairs(values) do
+            local offset = checkList[i].address - result.address
+            if val.value ~= offsetChecks[offset] then
+                passed = false
+                break
+            end
+        end
+
+        if passed then
+            for offset, _ in pairs(offsetChecks) do
+                table.insert(validEditTargets, {
+                    address = result.address + offset,
+                    value = hitboxValue,
+                    flags = gg.TYPE_FLOAT
+                })
+            end
+        end
+    end
+
+    gg.setValues(validEditTargets)
+    local elapsed = os.clock() - startTime
+    gg.toast("Edited " .. #validEditTargets .. " offset(s) in " .. string.format("%.2f", elapsed) .. "s")
+end
+
+-- Function: Looping edit with LibCheck verification
+function startLoopingEdit()
+    while true do
+        -- Check LibCheck value
+        if libCheck["Check"] then
+            local val = gg.getValues({{address = libCheck["Check"], flags = gg.TYPE_DWORD}})
+            if val[1].value ~= 1070554153 then
+                gg.toast("LibCheck failed — re-patching...")
+                patch162AndSaveLibCheck()
+            end
+        else
+            -- If not defined, force a patch
+            patch162AndSaveLibCheck()
+        end
+
+        -- Main editing
+        findAndEditHitboxes()
+
+        -- Alert only if GG is visible
+        if gg.isVisible(true) then
+            local choice = gg.alert("Stop?", "Yes", "No")
+            if choice == 1 then
+                break
+            end
+        end
+    end
+end
+
+-- Menu
+function HOME()
+    local mainMenu = gg.choice({
+        "👤 Player",
+        "⚔️ Combat",
+        "🎨 Render",
+        "❌ Exit"
+    }, nil, "🌟 Main Menu - Xa Code Utility 🌟")
+
+    if mainMenu == nil then
+        gg.setVisible(false)
+    elseif mainMenu == 1 then
+        playerMenu()
+    elseif mainMenu == 2 then
+        combatMenu()
+    elseif mainMenu == 3 then
+        renderMenu()
+    elseif mainMenu == 4 then
+        os.exit()
+    end
+end
+
+function combatMenu()
+    while true do
+        local menu = gg.choice({
+            "⚒️ Config Hitbox (" .. hitboxValue .. ")",
+            "🔁 Run (Fast)",
+            "🎯 Aimbot (test)",
+            "🔙 Back"
+        }, nil, "⚔️ Combat Settings")
+
+        if menu == nil then
+            gg.setVisible(false)
+            while true do
+                if gg.isVisible() then
+                    gg.setVisible(false)
+                    break
+                end
+                gg.sleep(100)
+            end
+        elseif menu == 1 then
+            configureHitbox()
+        elseif menu == 2 then
+            startLoopingEdit()
+        elseif menu == 3 then
+            findAndEditHitboxes()
+        elseif menu == 4 then
+            return HOME()
+        end
+    end
+end
+
+function playerMenu()
+    gg.alert("🚧 Player settings coming soon!")
+    HOME()
+end
+
+function renderMenu()
+    gg.alert("🚧 Render settings coming soon!")
+    HOME()
+end
+
+
+
+while true do
+    if gg.isVisible(true) then
+        Rex = 1
+        gg.setVisible(false)
+    end
+    if Rex == 1 then
+        HOME()
+        
+        Rex = 0
+    end
+end
