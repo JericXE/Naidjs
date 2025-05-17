@@ -1,205 +1,397 @@
--- Global config
-local hitboxValue = 1.0
-local libCheck = {}
+local LibDB = {}
+local FeatureList = {}
 
--- Offset checks
-local offsetChecks = {
-    [-352] = 1058642330,
-    [-396] = 1058642330,
-    [-416] = 1072064102,
-    [-508] = 1058642330
-}
-
--- Function: Configure hitbox
-function configureHitbox()
-    local input = gg.prompt({"Set Hitbox Value [0;10])"}, {hitboxValue}, {"number"})
-    if input and tonumber(input[1]) and tonumber(input[1]) >= 0 and tonumber(input[1]) <= 10 then
-        hitboxValue = tonumber(input[1])
-        gg.toast("Hitbox value set to " .. hitboxValue)
-    else
-        gg.alert("Invalid input or canceled.")
-    end
-end
-
--- Function: Find and patch 1.62s, store LibCheck address
-function patch162AndSaveLibCheck()
-
-    local target_value = 1.62
-    local new_value = 0.61
-    local offsets = {-52, -96, -116, -208}
-    local edits = {}
-
-    gg.clearResults()
-    gg.searchNumber(target_value, gg.TYPE_FLOAT, false, gg.SIGN_EQUAL, 0, -1)
-    local results = gg.getResults(1000)
-
-    for i, res in ipairs(results) do
-        local base_addr = res.address
-        for _, offset in ipairs(offsets) do
-            local addr = base_addr + offset
-            local old = gg.getValues({{address = addr, flags = gg.TYPE_FLOAT}})
-            if old and old[1] and type(old[1].value) == "number" then
-                table.insert(edits, {
-                    address = addr,
-                    flags = gg.TYPE_FLOAT,
-                    value = new_value
-                })
-            end
-        end
+-- Unified Lib function
+function Lib(name, mode, config)
+    local entry = LibDB[name]
+    if not entry then
+        gg.toast("Error: '" .. name .. "' not initialized.")
+        return
     end
 
-    if #results > 0 then
-        libCheck["Check"] = results[1].address -- Save first result for Dword check
-    end
-
-    if #edits > 0 then
-        gg.setValues(edits)
-        gg.toast("Offsets patched!")
-    else
-        gg.toast("No valid offsets found.")
-    end
-
-    gg.alert("Done!")
-end
-
--- Function: Hitbox finder + editor
-function findAndEditHitboxes()
-    gg.setRanges(gg.REGION_OTHER)
-    gg.clearResults()
-
-    local startTime = os.clock()
-    gg.searchNumber("1127481344", gg.TYPE_DWORD)
-    local allResults = gg.getResults(gg.getResultsCount())
-    local validEditTargets = {}
-
-    for _, result in ipairs(allResults) do
-        local checkList = {}
-        local passed = true
-
-        for offset, expected in pairs(offsetChecks) do
-            table.insert(checkList, {
-                address = result.address + offset,
-                flags = gg.TYPE_DWORD
-            })
-        end
-
-        local values = gg.getValues(checkList)
-        for i, val in ipairs(values) do
-            local offset = checkList[i].address - result.address
-            if val.value ~= offsetChecks[offset] then
-                passed = false
-                break
-            end
-        end
-
-        if passed then
-            for offset, _ in pairs(offsetChecks) do
-                table.insert(validEditTargets, {
-                    address = result.address + offset,
-                    value = hitboxValue,
-                    flags = gg.TYPE_FLOAT
-                })
-            end
-        end
-    end
-
-    gg.setValues(validEditTargets)
-    local elapsed = os.clock() - startTime
-    gg.toast("Edited " .. #validEditTargets .. " offset(s) in " .. string.format("%.2f", elapsed) .. "s")
-end
-
--- Function: Looping edit with LibCheck verification
-function startLoopingEdit()
-    while true do
-        -- Check LibCheck value
-        if libCheck["Check"] then
-            local val = gg.getValues({{address = libCheck["Check"], flags = gg.TYPE_DWORD}})
-            if val[1].value ~= 1070554153 then
-                gg.toast("LibCheck failed — re-patching...")
-                patch162AndSaveLibCheck()
-            end
-        else
-            -- If not defined, force a patch
-            patch162AndSaveLibCheck()
-        end
-
-        -- Main editing
-        findAndEditHitboxes()
-
-        -- Alert only if GG is visible
-        if gg.isVisible(true) then
-            local choice = gg.alert("Stop?", "Yes", "No")
-            if choice == 1 then
-                break
-            end
-        end
-    end
-end
-
--- Menu
-function HOME()
-    local mainMenu = gg.choice({
-        "👤 Player",
-        "⚔️ Combat",
-        "🎨 Render",
-        "❌ Exit"
-    }, nil, "🌟 Main Menu - Xa Code Utility 🌟")
-
-    if mainMenu == nil then
-        gg.setVisible(false)
-    elseif mainMenu == 1 then
-        playerMenu()
-    elseif mainMenu == 2 then
-        combatMenu()
-    elseif mainMenu == 3 then
-        renderMenu()
-    elseif mainMenu == 4 then
-        os.exit()
-    end
-end
-
-function combatMenu()
-    while true do
-        local menu = gg.choice({
-            "⚒️ Config Hitbox (" .. hitboxValue .. ")",
-            "🔁 Run (Fast)",
-            "🎯 Aimbot (test)",
-            "🔙 Back"
-        }, nil, "⚔️ Combat Settings")
-
-        if menu == nil then
-            gg.setVisible(false)
-            while true do
-                if gg.isVisible() then
-                    gg.setVisible(false)
+    if mode == "Toggle" then
+        if name == "InfinityJump" or name == "AutoClick" or name == "FastClick" then
+            local isFrozen = false
+            for _, item in ipairs(gg.getListItems()) do
+                if item.address == entry.address then
+                    isFrozen = true
                     break
                 end
-                gg.sleep(100)
             end
-        elseif menu == 1 then
-            configureHitbox()
-        elseif menu == 2 then
-            startLoopingEdit()
-        elseif menu == 3 then
-            findAndEditHitboxes()
-        elseif menu == 4 then
-            return HOME()
+            if isFrozen then
+                gg.removeListItems({{address = entry.address, flags = entry.flags}})
+                gg.toast(name .. " toggled to OFF")
+            else
+                gg.setValues({{address = entry.address, flags = entry.flags, value = config.on}})
+                gg.addListItems({{address = entry.address, flags = entry.flags, value = config.on, freeze = true}})
+                gg.toast(name .. " toggled to ON")
+            end
+        else
+            config = config or {on = 1, off = 0}
+            local val = gg.getValues({{address = entry.address, flags = entry.flags}})[1].value
+            local newVal = (val == config.on) and config.off or config.on
+            gg.setValues({{address = entry.address, flags = entry.flags, value = newVal}})
+            gg.toast(name .. " toggled to " .. (newVal == config.on and "ON" or "OFF"))
+        end
+    elseif mode == "Prompt" then
+        local val = gg.getValues({{address = entry.address, flags = entry.flags}})[1].value
+        local label = config and config.label or (name .. " [0;99]")
+        local prompt = gg.prompt({label}, {[1] = tonumber(string.format("%.1f", val))}, {[1] = 'number'})
+        if prompt and tonumber(prompt[1]) then
+            gg.setValues({{address = entry.address, flags = entry.flags, value = tonumber(prompt[1])}})
+            gg.toast(name .. " updated to " .. prompt[1])
         end
     end
 end
 
-function playerMenu()
-    gg.alert("🚧 Player settings coming soon!")
-    HOME()
+-- Check libBlockMan.so
+local found = false
+for _, lib in ipairs(gg.getRangesList()) do
+    if lib.name:find("libBlockMan.so") then
+        found = true
+        break
+    end
+end
+if not found then gg.alert("Error: libBlockMan.so not found") os.exit() end
+
+local regions = { gg.REGION_OTHER}
+
+-- Search for base float 1.62
+-- Save the 1.62 value as 'Check' in LibDB
+do
+    local matched = false
+    for _, region in ipairs(regions) do
+        gg.setRanges(region)
+        gg.searchNumber("1.62", gg.TYPE_FLOAT)
+        if gg.getResultsCount() > 0 then
+            matched = true
+            break
+        end
+        gg.clearResults()
+    end
+    if matched then
+        local v = gg.getResults(1)[1]
+        -- Save the base float address as 'Check' in LibDB
+        LibDB["Check"] = v.address
+        -- Rest of the code to assign feature addresses
+        LibDB["Flydev"] = { address = v.address + 1148, flags = gg.TYPE_FLOAT }
+        LibDB["FlydevSpeed"] = { address = v.address + 1140, flags = gg.TYPE_FLOAT }
+        LibDB["InfinityJump"] = { address = v.address - 184, flags = gg.TYPE_DWORD }
+        LibDB["Speed"] = { address = v.address + 376, flags = gg.TYPE_FLOAT }
+        table.insert(FeatureList, "Flydev")
+        table.insert(FeatureList, "FlydevSpeed")
+        table.insert(FeatureList, "InfinityJump")
+        table.insert(FeatureList, "Speed")
+        gg.clearResults()
+    end
 end
 
-function renderMenu()
-    gg.alert("🚧 Render settings coming soon!")
-    HOME()
+-- Function to recheck the 'Check' saved in LibDB
+function recheck()
+    local checkAddress = LibDB["Check"]
+    if checkAddress then
+        local checkValue = gg.getValues({{address = checkAddress, flags = gg.TYPE_DWORD}})[1].value
+        
+        if checkValue == 1070554153 then            
+        else            
+            -- Research 1.62 and overwrite entries
+            -- Re-search for the base float 1.62 and update all necessary values
+            local regions = {gg.REGION_C_ALLOC, gg.REGION_ANONYMOUS, gg.REGION_OTHER}
+            local matched = false
+            for _, region in ipairs(regions) do
+                gg.setRanges(region)
+                gg.searchNumber("1.62", gg.TYPE_FLOAT)
+                if gg.getResultsCount() > 0 then
+                    matched = true
+                    break
+                end
+                gg.clearResults()
+            end
+
+            if matched then
+                local v = gg.getResults(1)[1]
+                -- Overwrite existing LibDB values with the newly found addresses
+                LibDB["Flydev"] = { address = v.address + 1148, flags = gg.TYPE_FLOAT }
+                LibDB["FlydevSpeed"] = { address = v.address + 1140, flags = gg.TYPE_FLOAT }
+                LibDB["InfinityJump"] = { address = v.address - 184, flags = gg.TYPE_DWORD }
+                LibDB["Speed"] = { address = v.address + 376, flags = gg.TYPE_FLOAT }
+
+                -- Re-store the "Check" address to LibDB
+                LibDB["Check"] = v.address
+
+                -- Only update FeatureList if the feature exists in the current LibDB (overwrite existing entries)
+                local featureNames = {"Flydev", "FlydevSpeed", "InfinityJump", "Speed"}
+                for _, feature in ipairs(featureNames) do
+                    if not table.has_value(FeatureList, feature) then
+                        table.insert(FeatureList, feature)
+                    end
+                end
+
+                gg.clearResults()
+                gg.toast("Values updated after recheck.")
+            else
+                gg.alert("Failed to find 1.62 base value.")
+            end
+        end
+    else
+        gg.alert("Check value not found.")
+    end
+end
+
+-- Helper function to check if a table contains a specific value
+function table.has_value(tab, val)
+    for _, value in ipairs(tab) do
+        if value == val then
+            return true
+        end
+    end
+    return false
 end
 
 
+-- AutoClick
+do
+    local matched = false
+    for _, region in ipairs(regions) do
+        gg.setRanges(region)
+        gg.searchNumber("5,767,703,748,835,016,704", gg.TYPE_QWORD)
+        if gg.getResultsCount() > 0 then
+            matched = true
+            break
+        end
+        gg.clearResults()
+    end
+    if matched then
+        local v = gg.getResults(1)[1]
+        LibDB["AutoClick"] = { address = v.address + 8, flags = gg.TYPE_DWORD }
+        table.insert(FeatureList, "AutoClick")
+        gg.clearResults()
+    end
+end
 
+-- AttackReach, Attack, Blink, Fly, NoDelay
+do
+gg.clearResults()
+gg.searchNumber("200", gg.TYPE_FLOAT)
+local results = gg.getResults(gg.getResultsCount())
+local validResults = {}
+
+for i, res in ipairs(results) do
+    local baseAddr = res.address
+
+    local offset320 = baseAddr + 320
+    local check1 = gg.getValues({{address = offset320, flags = gg.TYPE_FLOAT}})
+    if check1[1].value == 5 then
+        local offset336 = baseAddr + 336
+        local check2 = gg.getValues({{address = offset336, flags = gg.TYPE_FLOAT}})
+        if check2[1].value == 6.5 then
+            table.insert(validResults, {address = offset320, flags = gg.TYPE_FLOAT})
+            table.insert(validResults, {address = offset336, flags = gg.TYPE_FLOAT})
+        end
+    end
+end
+
+-- Step 2: Load to results and show alert
+gg.clearResults()
+gg.loadResults(validResults)
+gg.alert("Found " .. (#validResults / 2) .. " Valid Sets (5 & 6.5)")
+
+-- Step 3: Build LibDB and FeatureList
+local results = gg.getResults(100)
+for _, v in ipairs(results) do
+    if v.value == 5 then
+        LibDB["Attack"] = { address = v.address, flags = v.flags }
+        table.insert(FeatureList, "Attack")
+    elseif v.value == 6.5 then
+        LibDB["AttackReach"] = { address = v.address, flags = v.flags }
+        LibDB["Blink"] = { address = v.address - 656, flags = gg.TYPE_DWORD }
+        LibDB["Fly"] = { address = v.address + 16, flags = gg.TYPE_DWORD }
+        LibDB["NoDelay"] = { address = v.address - 608, flags = gg.TYPE_DWORD }
+        table.insert(FeatureList, "AttackReach")
+        table.insert(FeatureList, "Blink")
+        table.insert(FeatureList, "Fly")
+        table.insert(FeatureList, "NoDelay")
+    end
+end
+end
+
+-- FastClick
+do
+    local matched = false
+    for _, region in ipairs(regions) do
+        gg.setRanges(region)
+        gg.searchNumber("31,243,722,414,882,817;7,274,496", gg.TYPE_QWORD)
+        gg.refineNumber("31,243,722,414,882,817", gg.TYPE_QWORD)
+        if gg.getResultsCount() > 0 then
+            matched = true
+            break
+        end
+        gg.clearResults()
+    end
+    if matched then
+        local v = gg.getResults(1)[1]
+        LibDB["FastClick"] = { address = v.address + 8, flags = gg.TYPE_DWORD }
+        table.insert(FeatureList, "FastClick")
+        gg.clearResults()
+    end
+end
+
+-- Clickraidues (newly added feature)
+-- Clickraidues (corrected detection)
+-- Clickraidues (Fixed region: gg.REGION_CODE_APP)
+do
+    gg.setRanges(gg.REGION_CODE_APP)
+    gg.searchNumber("1056964608", gg.TYPE_DWORD)
+    if gg.getResultsCount() > 0 then
+        local results = gg.getResults(100)
+        for _, v in ipairs(results) do
+            local val_24 = gg.getValues({{address = v.address - 24, flags = gg.TYPE_DWORD}})[1].value
+            local val_28 = gg.getValues({{address = v.address - 28, flags = gg.TYPE_DWORD}})[1].value
+
+            if val_28 == 1040187392 and val_24 == 1063256064 then
+                LibDB["Clickraidues"] = {
+                    address_4 = v.address + 4,
+                    address_8 = v.address + 8,
+                    address_12 = v.address + 12,
+                    address_16 = v.address + 16
+                }
+                table.insert(FeatureList, "Clickraidues")
+                gg.toast("Clickraidues initialized!")
+                break
+            end
+        end
+        gg.clearResults()
+    else
+        gg.alert("Failed to find Clickraidues base value.")
+    end
+end
+
+function HOME()
+    local menu = {}
+    local actionMap = {}
+
+    local function addOption(label, action)
+        table.insert(menu, label)
+        table.insert(actionMap, action)
+    end
+
+    for _, feature in ipairs(FeatureList) do
+        if feature == "AttackReach" or feature == "Attack" then
+            local val = gg.getValues({{address = LibDB[feature].address, flags = LibDB[feature].flags}})[1].value
+            addOption("Edit " .. feature .. " [" .. string.format("%.1f", val) .. "]", function()
+                Lib(feature, "Prompt")
+            end)
+        elseif feature == "Blink" then
+            local val = gg.getValues({{address = LibDB.Blink.address, flags = gg.TYPE_DWORD}})[1].value
+            addOption("Toggle Blink [" .. (val == 0 and "ON" or "OFF") .. "]", function()
+                Lib("Blink", "Toggle", {on = 0, off = 1})
+            end)
+        elseif feature == "Fly" then
+            local val = gg.getValues({{address = LibDB.Fly.address, flags = gg.TYPE_DWORD}})[1].value
+            addOption("Toggle Fly [" .. (val == 1 and "ON" or "OFF") .. "]", function()
+                Lib("Fly", "Toggle", {on = 1, off = 0})
+            end)
+        elseif feature == "NoDelay" then
+            local val = gg.getValues({{address = LibDB.NoDelay.address, flags = gg.TYPE_DWORD}})[1].value
+            addOption("Toggle NoDelay [" .. (val == 1 and "ON" or "OFF") .. "]", function()
+                Lib("NoDelay", "Toggle", {on = 1, off = 0})
+            end)
+        elseif feature == "Flydev" then
+            local val = gg.getValues({{address = LibDB.Flydev.address, flags = gg.TYPE_FLOAT}})[1].value
+            addOption("Toggle DevFly [" .. (val == 0.5 and "ON" or "OFF") .. "]", function()
+                Lib("Flydev", "Toggle", {on = 0.5, off = 0})
+                if gg.getValues({{address = LibDB.Flydev.address, flags = gg.TYPE_FLOAT}})[1].value == 0.5 then
+                    local sp = gg.prompt({"Set FlyDevSpeed [1-10]"}, {5}, {"number"})
+                    if sp and tonumber(sp[1]) then
+                        local fspd = tonumber(sp[1]) * 0.1
+                        gg.setValues({{address = LibDB.FlydevSpeed.address, flags = gg.TYPE_FLOAT, value = fspd}})
+                        gg.toast("FlyDevSpeed set to " .. fspd)
+                    end
+                end
+            end)
+elseif feature == "Clickraidues" then
+    local values = gg.getValues({
+        {address = LibDB.Clickraidues.address_4, flags = gg.TYPE_FLOAT},
+        {address = LibDB.Clickraidues.address_8, flags = gg.TYPE_FLOAT},
+        {address = LibDB.Clickraidues.address_12, flags = gg.TYPE_FLOAT},
+        {address = LibDB.Clickraidues.address_16, flags = gg.TYPE_FLOAT}
+    })
+
+    local isOff = (
+        math.abs(values[1].value + 0.1) < 0.01 and
+        math.abs(values[2].value + 0.1) < 0.01 and
+        math.abs(values[3].value + 0.1) < 0.01 and
+        math.abs(values[4].value - 0.1) < 0.01
+    )
+
+    local currentRadius = isOff and 0 or math.abs(values[1].value)
+    local status = isOff and "OFF" or "ON"
+    local display = isOff and "(OFF)" or string.format("(%gx)", currentRadius)
+
+    addOption("Toggle Hitbox [" .. status .. "] " .. display, function()
+        if isOff then
+            local prompt = gg.prompt({"Set Click Radius [1 - 99]"}, {10}, {"number"})
+            if prompt and tonumber(prompt[1]) then
+                local radius = tonumber(prompt[1])
+                local newValues = {
+                    {address = LibDB.Clickraidues.address_4, flags = gg.TYPE_FLOAT, value = -radius},
+                    {address = LibDB.Clickraidues.address_8, flags = gg.TYPE_FLOAT, value = -radius},
+                    {address = LibDB.Clickraidues.address_12, flags = gg.TYPE_FLOAT, value = -radius},
+                    {address = LibDB.Clickraidues.address_16, flags = gg.TYPE_FLOAT, value = radius}
+                }
+                gg.setValues(newValues)
+                gg.toast("Click Radius set to " .. radius .. "x")
+            end
+        else
+            local offValues = {
+                {address = LibDB.Clickraidues.address_4, flags = gg.TYPE_FLOAT, value = -0.1},
+                {address = LibDB.Clickraidues.address_8, flags = gg.TYPE_FLOAT, value = -0.1},
+                {address = LibDB.Clickraidues.address_12, flags = gg.TYPE_FLOAT, value = -0.1},
+                {address = LibDB.Clickraidues.address_16, flags = gg.TYPE_FLOAT, value = 0.1}
+            }
+            gg.setValues(offValues)
+            gg.toast("Click Radius turned OFF")
+        end
+    end)
+
+
+        elseif feature == "InfinityJump" or feature == "AutoClick" or feature == "FastClick" then
+            local frozen = false
+            for _, item in ipairs(gg.getListItems()) do
+                if item.address == LibDB[feature].address then
+                    frozen = true
+                end
+            end
+            addOption("Toggle " .. feature .. " [" .. (frozen and "ON" or "OFF") .. "]", function()
+                local val = (feature == "InfinityJump") and 257 or 1
+                Lib(feature, "Toggle", {on = val, off = 0})
+            end)
+        elseif feature == "Speed" then
+            local val = gg.getValues({{address = LibDB.Speed.address, flags = gg.TYPE_FLOAT}})[1].value
+            addOption("Speed (" .. (val > 0 and string.format("%.0fx", val * 10) or "0x") .. ") " .. (val > 0 and "On" or "Off"), function()
+                if val > 0 then
+                    gg.setValues({{address = LibDB.Speed.address, flags = gg.TYPE_FLOAT, value = 0}})
+                    gg.toast("Speed Off")
+                else
+                    local prompt = gg.prompt({"Set Speed [1-10]"}, {3}, {"number"})
+                    if prompt and tonumber(prompt[1]) then
+                        local newSpeed = tonumber(prompt[1]) * 0.1
+                        gg.setValues({{address = LibDB.Speed.address, flags = gg.TYPE_FLOAT, value = newSpeed}})
+                        gg.toast("Speed set to " .. prompt[1] .. "x")
+                    end
+                end
+            end)
+        end
+    end
+
+    addOption("Exit", function() os.exit() end)
+
+    local choice = gg.choice(menu, nil, "Select an available feature")
+    if choice and actionMap[choice] then actionMap[choice]() end
+end
+
+
+-- Main loop
 while true do
     if gg.isVisible(true) then
         Rex = 1
@@ -207,7 +399,7 @@ while true do
     end
     if Rex == 1 then
         HOME()
-        
+        recheck()
         Rex = 0
     end
 end
